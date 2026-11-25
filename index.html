@@ -59,6 +59,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var
 #err{display:none;max-width:420px;margin:14px auto 0;font-size:15px}
 @media(max-width:700px){#idx{top:auto;bottom:16px;right:72px;left:16px;width:auto;max-height:46vh}#cart h1{font-size:28px}#cart p{display:none}#scale,#src{display:none}}
 
+.card{position:fixed;background:rgba(244,236,220,.94);border:1px solid var(--line);box-shadow:0 1px 0 rgba(255,255,255,.7) inset,0 10px 30px rgba(42,33,25,.14);backdrop-filter:blur(2px)}
+#cart{top:16px;left:16px;padding:14px 20px 12px;max-width:min(330px,calc(100vw - 32px))}
+#cart h1{margin:0;font:600 36px/1 "Cormorant Garamond",serif;color:var(--bur);letter-spacing:.05em}
+#cart h1 span{font:700 28px Amiri,serif;color:var(--navy);margin-left:10px}
+#cart p{margin:8px 0 0;font-size:15px;color:#4a3d31}
+#cart .rule{height:1px;background:linear-gradient(90deg,var(--bur),transparent);margin-top:10px;opacity:.5}
+
 #load{position:fixed;inset:0;display:grid;place-items:center;background:var(--paper);z-index:9;transition:opacity .8s}
 #load div{text-align:center}#load h2{font:600 46px "Cormorant Garamond",serif;color:var(--bur);margin:0;letter-spacing:.05em}
 #load p{font:italic 17px "Cormorant Garamond",serif;color:#4a3d31;margin:6px 0 0}
@@ -102,65 +109,76 @@ const viewer = new Cesium.Viewer('map', {
   requestRenderMode: true, maximumRenderTimeChange: Infinity, msaaSamples: 1, contextOptions: { webgl: { preserveDrawingBuffer: false } } });
 const scene = viewer.scene;
 scene.backgroundColor = Cesium.Color.fromCssColorString('#f2e9d6');
-scene.fog.enabled = false; if (scene.sun) scene.sun.show = false; if (scene.moon) scene.moon.show = false;
+scene.fog.enabled = false;
+scene.light = new Cesium.DirectionalLight({ direction: Cesium.Cartesian3.normalize(new Cesium.Cartesian3(0.55, 0.62, -0.56), new Cesium.Cartesian3()), intensity: 2.2 });
+if (!mobile) { scene.shadowMap.enabled = true; scene.shadowMap.softShadows = true; scene.shadowMap.size = 2048; scene.shadowMap.maximumDistance = 2500; scene.shadowMap.darkness = 0.55; } if (scene.sun) scene.sun.show = false; if (scene.moon) scene.moon.show = false;
 viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, mobile ? 1.5 : 2) / (window.devicePixelRatio || 1);
 scene.screenSpaceCameraController.minimumZoomDistance = 25;
 scene.screenSpaceCameraController.maximumZoomDistance = 30000;
 scene.screenSpaceCameraController.enableCollisionDetection = true;
 
 // ---------------------------------------------------------------- the pen-and-wash plate, drawn over Google's real 3D city
-const FS = `
-uniform sampler2D colorTexture; uniform sampler2D depthTexture; in vec2 v_textureCoordinates;
+const FS = `uniform sampler2D colorTexture; uniform sampler2D depthTexture; in vec2 v_textureCoordinates;
 float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f); return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }
 float fbm(vec2 p){ float s = 0., a = .5; for (int i = 0; i < 4; i++){ s += a*n2(p); p = p*2.03 + 1.7; a *= .5; } return s; }
-vec3 eyePos(vec2 uv){ float d = czm_readDepth(depthTexture, uv); vec4 p = czm_inverseProjection * vec4(uv*2.-1., d, 1.); return p.xyz / p.w; }
 float lum(vec3 c){ return dot(c, vec3(.299, .587, .114)); }
+vec3 eyeAt(vec2 uv){ float d = czm_readDepth(depthTexture, uv); vec4 p = czm_inverseProjection * vec4(uv*2.-1., d*2.-1., 1.); return p.xyz / p.w; }
+float dep(vec2 uv){ return czm_readDepth(depthTexture, uv); }
+vec3 blurC(vec2 uv, vec2 tx, float r){ vec3 s = vec3(0.); for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) s += texture(colorTexture, uv + vec2(float(i), float(j)) * tx * r).rgb; return s / 9.; }
 void main(){
-  vec2 uv = v_textureCoordinates, px = gl_FragCoord.xy, tx = 1. / czm_viewport.zw;
-  float dpr = czm_pixelRatio;
-  vec2 q = px / dpr;
-  vec3 paper = vec3(0.962, 0.932, 0.868) * (1. - fbm(q*0.010)*0.045 - fbm(q*0.085)*0.035 - (h2(floor(q))-.5)*0.025);
-  float dr = czm_readDepth(depthTexture, uv);
-  if (dr >= 1.0) {                                   // sky: washed blue over warm haze
-    float up = clamp(uv.y, 0., 1.); vec3 s = mix(vec3(0.93, 0.91, 0.86), vec3(0.58, 0.71, 0.86), smoothstep(0.45, 1.0, up));
-    out_FragColor = vec4(paper * mix(vec3(1.), s, 0.75 + 0.25*fbm(q*0.004)), 1.); return; }
-  vec3 P = eyePos(uv); float dist = -P.z;
-  float mpp = dist * 2. * tan(czm_frustumPlanes.x > 0. ? 0.4 : 0.4) / czm_viewport.w * dpr;     // metres per css pixel (approx.)
-  float r = max(1., floor(0.85*dpr + .5));
-  // ---- ink: silhouettes from depth, creases from reconstructed normals, and the city's own detail from the photo texture
-  vec3 Pr = eyePos(uv + vec2(r, 0.)*tx), Pl = eyePos(uv - vec2(r, 0.)*tx), Pu = eyePos(uv + vec2(0., r)*tx), Pd = eyePos(uv - vec2(0., r)*tx);
-  float lap = (abs(Pr.z + Pl.z - 2.*P.z) + abs(Pu.z + Pd.z - 2.*P.z)) / max(dist, 1.);
-  float eS = smoothstep(0.012, 0.05, lap);
-  vec3 nC = normalize(cross(Pr - Pl, Pu - Pd));
-  vec3 nR = normalize(cross(eyePos(uv + vec2(2.*r, 0.)*tx) - P, eyePos(uv + vec2(r, r)*tx) - Pr));
-  vec3 nU = normalize(cross(eyePos(uv + vec2(r, r)*tx) - Pu, eyePos(uv + vec2(0., 2.*r)*tx) - P));
-  float eC = smoothstep(0.12, 0.35, max(1. - dot(nC, nR), 1. - dot(nC, nU))) * (1. - smoothstep(60., 600., dist));
-  vec3 c0 = texture(colorTexture, uv).rgb;
-  float gx = lum(texture(colorTexture, uv + vec2(r, 0.)*tx).rgb) - lum(texture(colorTexture, uv - vec2(r, 0.)*tx).rgb);
-  float gy = lum(texture(colorTexture, uv + vec2(0., r)*tx).rgb) - lum(texture(colorTexture, uv - vec2(0., r)*tx).rgb);
-  float g = length(vec2(gx, gy));
-  float eT = smoothstep(0.10, 0.26, g) * (1. - smoothstep(250., 1800., dist));           // windows, balconies, doors, cornices
-  float ink = max(max(eS, eC * 0.8), eT * 0.62);
-  ink *= mix(1.0, 0.45, smoothstep(400., 4000., dist));                                     // the pen lightens with distance
-  // ---- wash: the real colour, thinned to a watercolour pigment, laid in soft value bands
-  float l = lum(c0);
-  vec3 chroma = c0 - vec3(l);
-  float lb = l * 4.2; float band = (floor(lb) + smoothstep(0.35, 0.65, fract(lb))) / 4.2;    // soft-edged value layers
-  float L = mix(l, band, 0.55);
-  L = 0.30 + 0.72 * pow(clamp(L, 0., 1.), 0.82);                                              // lift: let the paper through
-  vec3 pig = clamp(vec3(L) + chroma * 1.35, 0., 1.);
-  float wet = 0.86 + 0.28 * fbm(q * 0.02 + dist * 0.0004);
-  float gran = 0.92 + 0.16 * n2(q * 0.6);
-  vec3 col = paper * pow(clamp(pig, 0.03, 1.), vec3(wet * gran));
-  float sh = smoothstep(0.42, 0.18, l);                                                       // shade: a cool violet glaze, as a painter would
-  col *= mix(vec3(1.), vec3(0.80, 0.82, 0.92), sh * 0.8);
-  // ---- haze into the distance
-  float hz = smoothstep(2500., 26000., dist);
-  col = mix(col, paper * vec3(0.80, 0.84, 0.90), hz * 0.78);
-  col = mix(col, vec3(0.20, 0.145, 0.10) * paper, clamp(ink, 0., 1.) * mix(0.82, 0.40, hz));
+  vec2 uv = v_textureCoordinates, tx = 1. / czm_viewport.zw, px = uv * czm_viewport.zw;
+  float dpr = czm_pixelRatio; vec2 q = px / dpr;
+  vec3 paper = vec3(0.962, 0.932, 0.868) * (1. - fbm(q*0.010)*0.05 - fbm(q*0.085)*0.035 - (h2(floor(q))-.5)*0.025);
+  float d0 = dep(uv);
+  if (d0 >= 1.0) { float up = clamp(uv.y, 0., 1.);
+    vec3 s = mix(vec3(0.90, 0.91, 0.92), vec3(0.64, 0.75, 0.87), smoothstep(0.62, 1.0, up));
+    out_FragColor = vec4(paper * s, 1.); return; }
+  vec3 P = eyeAt(uv); float dist = max(-P.z, 1.);
+  float mpp = dist * czm_frustumPlanes.x * 0. + dist * 2. * 0.4 / czm_viewport.w;      // metres per pixel (approx., fov ~45)
+  float r = max(1., floor(0.9*dpr + .5));
+  // ---------- ink
+  vec3 Pr = eyeAt(uv + vec2(r, 0.)*tx), Pl = eyeAt(uv - vec2(r, 0.)*tx), Pu = eyeAt(uv + vec2(0., r)*tx), Pd = eyeAt(uv - vec2(0., r)*tx);
+  float lap = (abs(Pr.z + Pl.z - 2.*P.z) + abs(Pu.z + Pd.z - 2.*P.z)) / dist;
+  float eS = smoothstep(0.004, 0.02, lap);
+  vec3 n0 = normalize(cross(Pr - Pl, Pu - Pd));
+  vec3 n1 = normalize(cross(eyeAt(uv + vec2(2.*r, 0.)*tx) - P, eyeAt(uv + vec2(r, r)*tx) - Pr));
+  vec3 n2_ = normalize(cross(eyeAt(uv + vec2(r, r)*tx) - Pu, eyeAt(uv + vec2(0., 2.*r)*tx) - P));
+  float eC = smoothstep(0.10, 0.30, max(1. - dot(n0, n1), 1. - dot(n0, n2_)));
+  vec3 cB = blurC(uv, tx, 1.0);                                   // the photo, softened: we paint from it, we don't show it
+  float gx = lum(blurC(uv + vec2(r, 0.)*tx, tx, 1.)) - lum(blurC(uv - vec2(r, 0.)*tx, tx, 1.));
+  float gy = lum(blurC(uv + vec2(0., r)*tx, tx, 1.)) - lum(blurC(uv - vec2(0., r)*tx, tx, 1.));
+  float eT = smoothstep(0.09, 0.22, length(vec2(gx, gy)));
+  float far_ = smoothstep(1.2, 6.0, mpp);                         // pen eases off as the city recedes
+  float ink = max(max(eS * 0.9, eC * 0.7 * (1. - far_)), eT * mix(0.55, 0.18, far_));
+  ink *= 0.55 + 0.45 * smoothstep(0.25, 0.6, n2(q * 0.9));        // broken, hand-drawn line
+  // ---------- wash: the real colour as watercolour pigment
+  float l = lum(cB);
+  vec3 chroma = cB - vec3(l);
+  float lb = l * 3.6; float band = (floor(lb) + smoothstep(0.30, 0.70, fract(lb))) / 3.6;
+  float L = mix(l, band, 0.75);
+  L = 0.52 + 0.52 * pow(clamp(L, 0., 1.), 0.70);                   // lift: the paper shows through
+  float sat = length(chroma);
+  float cboost = mix(0.30, 1.10, smoothstep(0.20, 0.50, l));          // shadows lose chroma, as washes do
+  vec3 pig = clamp(vec3(L) + chroma * cboost, 0., 1.);
+  float blueSea = smoothstep(0.04, 0.12, cB.b - max(cB.r, cB.g * 0.9));
+  pig = mix(pig, mix(vec3(0.66, 0.78, 0.86), vec3(0.52, 0.68, 0.80), smoothstep(0.3, 0.1, l)), blueSea * 0.75);
+  // whitewash stays white: near-neutral light surfaces become paper
+  pig = mix(pig, vec3(0.985, 0.975, 0.95), smoothstep(0.50, 0.75, l) * (1. - smoothstep(0.03, 0.10, sat)) * 0.85);
+  float wet = 0.84 + 0.32 * fbm(q * 0.018 + vec2(dist * 0.0003));
+  float gran = 0.93 + 0.14 * n2(q * 0.55);
+  float pool = smoothstep(0.03, 0.10, length(vec2(gx, gy))) * 0.15;  // pigment pools at the edges of each wash
+  vec3 col = paper * pow(clamp(pig, 0.03, 1.), vec3(wet * gran * (1. + pool)));
+  float sh = smoothstep(0.40, 0.14, l);
+  col *= mix(vec3(1.), vec3(0.82, 0.83, 0.93), sh * 0.7);          // cool violet glaze in shadow
+  // ---------- distance: haze, and hide the coarse far tiles under a soft wash
+  float hz = smoothstep(1200., 9000., dist);
+  vec3 hzc = paper * vec3(0.90, 0.91, 0.92);
+  col = mix(col, hzc, hz * 0.92);
+  col = mix(col, vec3(0.20, 0.145, 0.10) * paper, clamp(ink, 0., 1.) * 0.85 * (1. - hz));
   out_FragColor = vec4(col, 1.);
-}`;
+}
+`;
 scene.postProcessStages.add(new Cesium.PostProcessStage({ fragmentShader: FS }));
 
 // ---------------------------------------------------------------- labels: districts and landmarks, placed on the real roofs
@@ -227,6 +245,10 @@ listEl.addEventListener('click', e => { const b = e.target.closest('button'); if
     $('lmsg').textContent = 'raising the city…';
     const ts = await Cesium.createGooglePhotorealistic3DTileset({ onlyUsingWithGoogleGeocoder: true }, { maximumScreenSpaceError: mobile ? 24 : 12, cacheBytes: (mobile ? 256 : 768) * 1024 * 1024, maximumCacheOverflowBytes: 128 * 1024 * 1024 });
     scene.primitives.add(ts);
+    // the city itself: every house, landmark, stair and tree, modelled and set on Google's real ground
+    try { const city = await Cesium.Cesium3DTileset.fromUrl('tiles/tileset.json', { maximumScreenSpaceError: mobile ? 12 : 6, cacheBytes: (mobile ? 192 : 640) * 1024 * 1024, skipLevelOfDetail: false, preloadFlightDestinations: true });
+      city.shadows = mobile ? Cesium.ShadowMode.DISABLED : Cesium.ShadowMode.ENABLED; scene.primitives.add(city); city.tileLoad.addEventListener(() => scene.requestRender()); window.__city = city;
+    } catch (e) { console.warn('city tiles', e); }
     start();
     let shown = false;
     ts.tileLoad.addEventListener(() => scene.requestRender());
