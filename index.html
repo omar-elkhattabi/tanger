@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tanger — carte à la plume</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.124.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.124.0/Build/Cesium/Cesium.js"></script>
+<style>
+
+/* VOICE: an engraver's survey of Tangier, calm and exact
+   IDEA: a living pen-and-wash atlas plate of the real city that you can walk through
+   PICTURE: the city itself, full-bleed, ink line and watercolour, every roof its real colour
+   COLOUR and TYPE: laid paper, burgundy titles, navy controls; Cormorant Garamond with Amiri for Arabic
+   LAYOUT: map fills the screen; cartouche top-left, index right, controls bottom-right */
+:root{--paper:#f2e9d6;--ink:#2a2119;--bur:#7a2433;--navy:#1f2f4f;--line:rgba(42,33,25,.22)}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font:16px/1.45 "Cormorant Garamond",Georgia,serif}
+
+
+#map{position:fixed;inset:0}
+#map .cesium-widget-credits{display:block!important;left:auto!important;right:76px;bottom:6px!important;font:11px Georgia,serif;color:#4a3d31}
+#map .cesium-credit-logoContainer img{filter:none}
+.cesium-viewer-bottom{display:none}
+#labels{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+.lb{position:absolute;left:0;top:0;white-space:nowrap;transform:translate(-50%,-100%);opacity:0;transition:opacity .25s}
+.lb.on{opacity:1}
+.lb span{paint-order:stroke;-webkit-text-stroke:3px rgba(242,233,214,.94)}
+.lb.pl span.t{font:700 13px "Cormorant Garamond",serif;letter-spacing:.22em;text-transform:uppercase;color:var(--bur)}
+.lb.lm span.t{font:italic 600 15px "Cormorant Garamond",serif;color:var(--navy)}
+.lb.lm i{display:inline-block;width:5px;height:5px;background:var(--bur);transform:rotate(45deg);margin-right:6px;vertical-align:2px}
+.lb .ar{font:15px Amiri,serif;margin-left:7px;color:var(--ink);opacity:.85}
+.lb.lm::after{content:"";display:block;width:1px;height:16px;margin:2px auto 0;background:rgba(42,33,25,.55)}
+
+#idx{top:16px;right:16px;width:300px;max-height:calc(100vh - 130px);display:flex;flex-direction:column}
+#idx header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+#idx header b{font:600 18px "Cormorant Garamond",serif;color:var(--navy);flex:1}
+#q{width:100%;font:16px "Cormorant Garamond",serif;padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);outline:none}
+#q:focus{background:rgba(255,255,255,.45)}
+#list{overflow:auto;padding:4px 0 8px}
+#list button{display:flex;width:100%;justify-content:space-between;align-items:center;gap:10px;border:0;background:none;text-align:left;font:16px "Cormorant Garamond",serif;color:var(--ink);padding:8px 14px;min-height:42px;cursor:pointer}
+#list button:hover,#list button:focus-visible{background:rgba(122,36,51,.08);outline:none}
+#list button small{font:15px Amiri,serif;color:#6a5a4a;white-space:nowrap;flex:none}
+#list h3{margin:10px 14px 2px;font:700 11.5px "Cormorant Garamond",serif;letter-spacing:.2em;text-transform:uppercase;color:var(--bur)}
+#tog{border:1px solid var(--line);background:none;color:var(--navy);font:600 14px "Cormorant Garamond",serif;padding:6px 12px;min-height:36px;cursor:pointer}
+#idx.closed #q,#idx.closed #list{display:none}
+#ctl{right:16px;bottom:16px;display:flex;flex-direction:column}
+#ctl button{width:46px;height:46px;border:0;border-bottom:1px solid var(--line);background:none;color:var(--navy);font:600 22px "Cormorant Garamond",serif;cursor:pointer}
+#ctl button:last-child{border-bottom:0}
+#ctl button:focus-visible,#tog:focus-visible{outline:2px solid var(--bur);outline-offset:-2px}
+#needle{display:block;margin:auto}
+#scale{left:16px;bottom:16px;padding:7px 12px;font-size:14px;color:#4a3d31}
+#scale i{display:block;height:6px;border:1.5px solid var(--ink);border-top:0;margin-top:3px}
+#src{left:50%;bottom:16px;transform:translateX(-50%);padding:6px 14px;font-size:13px;color:#5a4a3a;max-width:min(600px,calc(100vw - 220px));text-align:center}
+#load{position:fixed;inset:0;display:grid;place-items:center;background:var(--paper);z-index:9;transition:opacity .8s}
+#load div{text-align:center}#load h2{font:600 46px "Cormorant Garamond",serif;color:var(--bur);margin:0;letter-spacing:.05em}
+#load p{font:italic 17px "Cormorant Garamond",serif;color:#4a3d31;margin:6px 0 0}
+#load i{display:block;width:240px;height:2px;background:var(--line);margin:16px auto 0;position:relative;overflow:hidden}
+#load i b{position:absolute;inset:0;width:0;background:var(--bur);transition:width .3s}
+#err{display:none;max-width:420px;margin:14px auto 0;font-size:15px}
+@media(max-width:700px){#idx{top:auto;bottom:16px;right:72px;left:16px;width:auto;max-height:46vh}#cart h1{font-size:28px}#cart p{display:none}#scale,#src{display:none}}
+
+#load{position:fixed;inset:0;display:grid;place-items:center;background:var(--paper);z-index:9;transition:opacity .8s}
+#load div{text-align:center}#load h2{font:600 46px "Cormorant Garamond",serif;color:var(--bur);margin:0;letter-spacing:.05em}
+#load p{font:italic 17px "Cormorant Garamond",serif;color:#4a3d31;margin:6px 0 0}
+#err{display:none;max-width:420px;margin:14px auto 0;font-size:15px}
+#ctl{bottom:calc(16px + env(safe-area-inset-bottom))}
+@media(max-width:700px){#idx{top:auto;bottom:calc(16px + env(safe-area-inset-bottom));right:72px;left:16px;width:auto;max-height:46vh}#cart h1{font-size:28px}#cart p{display:none}
+  #map .cesium-widget-credits{right:8px;bottom:calc(env(safe-area-inset-bottom) + 70px)!important;font-size:9px}}
+</style></head>
+<body>
+<div id="map" aria-label="Map of Tangier"></div><div id="labels"></div>
+<section id="cart" class="card"><h1>Tanger<span>طنجة</span></h1>
+<p>The real city, every building as it stands, drawn in ink and watercolour.</p><div class="rule"></div></section>
+<nav id="idx" class="card" aria-label="Index of places"><header><b>Index of places</b><button id="tog" aria-expanded="true">Hide</button></header>
+<input id="q" type="search" placeholder="Find a place…" aria-label="Find a place" autocomplete="off"><div id="list"></div></nav>
+<div id="ctl" class="card"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button>
+<button id="north" aria-label="Face north"><svg id="needle" width="22" height="30" viewBox="0 0 22 30" style="display:block;margin:auto"><path d="M11 1 L17 16 L11 13 L5 16Z" fill="#7a2433"/><path d="M11 29 L5 14 L11 17 L17 14Z" fill="none" stroke="#1f2f4f" stroke-width="1.4"/></svg></button></div>
+<div id="load"><div><h2>Tanger</h2><p id="lmsg">laying out the paper…</p><p id="err"></p></div></div>
+<script>
+{
+const $ = id => document.getElementById(id);
+const GROUPS = [
+  ['La médina', [['Kasbah', 'القصبة', 35.78817, -5.81264, 520], ['Grand Socco (Place du 9 Avril)', 'السوق البراني', 35.78409, -5.81386, 420], ['Cinéma Rif', 'سينما الريف', 35.78368, -5.81307, 260],
+    ['Petit Socco', 'السوق الداخل', 35.7853, -5.8098, 300], ['Grande Mosquée', 'الجامع الكبير', 35.78563, -5.80965, 320], ['Légation américaine', '', 35.78386, -5.81088, 300],
+    ['Hôtel Continental', '', 35.78752, -5.80953, 380], ['Borj En-Nâam', '', 35.78918, -5.81451, 360]]],
+  ['Ville nouvelle', [['Mosquée Mohammed V', 'مسجد محمد الخامس', 35.78097, -5.8195, 380], ['Terrasse des Paresseux', '', 35.78086, -5.81179, 380], ['Gran Teatro Cervantes', '', 35.78201, -5.8107, 320],
+    ['El Minzah', '', 35.78187, -5.81241, 320], ['Église Saint-André', '', 35.78356, -5.81463, 300], ['Cathédrale de Tanger', 'كاتدرائية طنجة', 35.7818, -5.8178, 340], ['Jardins de la Mendoubia', '', 35.78513, -5.81437, 380]]],
+  ['Mer et collines', [['Café Hafa', 'مقهى الحافة', 35.79139, -5.82197, 300], ['Marchan', 'مرشان', 35.79, -5.825, 800], ['Dradeb', 'الدرادب', 35.7865, -5.8325, 800],
+    ['Mosquée du Port (Lalla Abla)', 'مسجد للا عبلة', 35.78947, -5.80714, 420], ['Port de Tanger Ville', 'الميناء', 35.788, -5.803, 1000], ['Tanja Marina Bay', '', 35.78476, -5.79783, 800],
+    ['La baie et la plage', 'الشاطئ', 35.774, -5.792, 1600], ['Malabata', 'ملاباطا', 35.78, -5.748, 1800], ['Le Charf', 'الشرف', 35.765, -5.805, 1300], ['La Montagne', 'الجبل الكبير', 35.785, -5.87, 2400]]]];
+const DISTRICTS = [['Médina', 'المدينة', 35.7860, -5.8110], ['Kasbah', 'القصبة', 35.7888, -5.8130], ['Marchan', 'مرشان', 35.7895, -5.8240], ['Dradeb', 'الدرادب', 35.7865, -5.8330],
+  ['Iberia', 'إيبيريا', 35.7810, -5.8215], ['Ville nouvelle', 'المدينة الجديدة', 35.7790, -5.8110], ['Port', 'الميناء', 35.7880, -5.8030], ['La Montagne', 'الجبل الكبير', 35.7880, -5.8650],
+  ['Malabata', 'ملاباطا', 35.7800, -5.7500], ['Le Charf', 'الشرف', 35.7660, -5.8050]];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fail = m => { $('err').style.display = 'block'; $('err').textContent = m; $('lmsg').textContent = 'the plate could not be drawn'; };
+
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IlkwTUJjcVUyVzZyX0VucFEiLCJqdGkiOiJkNGYwMGFiZi1mODdkLTRkZWEtODJkNi1jYWRmNmI0NDEwOGMiLCJpZCI6NTU2MzYwLCJzdWIiOiJvbWFyZWxraGF0dGFiaSIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJUYW5nZXIgbWFwIiwiaWF0IjoxNzk1NTY1NDU5fQ.LYJF2o6VoSM53pTeihqWuvz89i7F5yKsQZAhTVJzGsE';
+const mobile = matchMedia('(max-width:700px)').matches || /iPhone|iPad|Android/.test(navigator.userAgent);
+const viewer = new Cesium.Viewer('map', {
+  globe: false, baseLayer: false, animation: false, timeline: false, baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false,
+  navigationHelpButton: false, fullscreenButton: false, infoBox: false, selectionIndicator: false, skyBox: false, skyAtmosphere: false,
+  requestRenderMode: true, maximumRenderTimeChange: Infinity, msaaSamples: 1, contextOptions: { webgl: { preserveDrawingBuffer: false } } });
+const scene = viewer.scene;
+scene.backgroundColor = Cesium.Color.fromCssColorString('#f2e9d6');
+scene.fog.enabled = false; if (scene.sun) scene.sun.show = false; if (scene.moon) scene.moon.show = false;
+viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, mobile ? 1.5 : 2) / (window.devicePixelRatio || 1);
+scene.screenSpaceCameraController.minimumZoomDistance = 25;
+scene.screenSpaceCameraController.maximumZoomDistance = 30000;
+scene.screenSpaceCameraController.enableCollisionDetection = true;
+
+// ---------------------------------------------------------------- the pen-and-wash plate, drawn over Google's real 3D city
+const FS = `
+uniform sampler2D colorTexture; uniform sampler2D depthTexture; in vec2 v_textureCoordinates;
+float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f); return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }
+float fbm(vec2 p){ float s = 0., a = .5; for (int i = 0; i < 4; i++){ s += a*n2(p); p = p*2.03 + 1.7; a *= .5; } return s; }
+vec3 eyePos(vec2 uv){ float d = czm_readDepth(depthTexture, uv); vec4 p = czm_inverseProjection * vec4(uv*2.-1., d, 1.); return p.xyz / p.w; }
+float lum(vec3 c){ return dot(c, vec3(.299, .587, .114)); }
+void main(){
+  vec2 uv = v_textureCoordinates, px = gl_FragCoord.xy, tx = 1. / czm_viewport.zw;
+  float dpr = czm_pixelRatio;
+  vec2 q = px / dpr;
+  vec3 paper = vec3(0.962, 0.932, 0.868) * (1. - fbm(q*0.010)*0.045 - fbm(q*0.085)*0.035 - (h2(floor(q))-.5)*0.025);
+  float dr = czm_readDepth(depthTexture, uv);
+  if (dr >= 1.0) {                                   // sky: washed blue over warm haze
+    float up = clamp(uv.y, 0., 1.); vec3 s = mix(vec3(0.93, 0.91, 0.86), vec3(0.58, 0.71, 0.86), smoothstep(0.45, 1.0, up));
+    out_FragColor = vec4(paper * mix(vec3(1.), s, 0.75 + 0.25*fbm(q*0.004)), 1.); return; }
+  vec3 P = eyePos(uv); float dist = -P.z;
+  float mpp = dist * 2. * tan(czm_frustumPlanes.x > 0. ? 0.4 : 0.4) / czm_viewport.w * dpr;     // metres per css pixel (approx.)
+  float r = max(1., floor(0.85*dpr + .5));
+  // ---- ink: silhouettes from depth, creases from reconstructed normals, and the city's own detail from the photo texture
+  vec3 Pr = eyePos(uv + vec2(r, 0.)*tx), Pl = eyePos(uv - vec2(r, 0.)*tx), Pu = eyePos(uv + vec2(0., r)*tx), Pd = eyePos(uv - vec2(0., r)*tx);
+  float lap = (abs(Pr.z + Pl.z - 2.*P.z) + abs(Pu.z + Pd.z - 2.*P.z)) / max(dist, 1.);
+  float eS = smoothstep(0.012, 0.05, lap);
+  vec3 nC = normalize(cross(Pr - Pl, Pu - Pd));
+  vec3 nR = normalize(cross(eyePos(uv + vec2(2.*r, 0.)*tx) - P, eyePos(uv + vec2(r, r)*tx) - Pr));
+  vec3 nU = normalize(cross(eyePos(uv + vec2(r, r)*tx) - Pu, eyePos(uv + vec2(0., 2.*r)*tx) - P));
+  float eC = smoothstep(0.12, 0.35, max(1. - dot(nC, nR), 1. - dot(nC, nU))) * (1. - smoothstep(60., 600., dist));
+  vec3 c0 = texture(colorTexture, uv).rgb;
+  float gx = lum(texture(colorTexture, uv + vec2(r, 0.)*tx).rgb) - lum(texture(colorTexture, uv - vec2(r, 0.)*tx).rgb);
+  float gy = lum(texture(colorTexture, uv + vec2(0., r)*tx).rgb) - lum(texture(colorTexture, uv - vec2(0., r)*tx).rgb);
+  float g = length(vec2(gx, gy));
+  float eT = smoothstep(0.10, 0.26, g) * (1. - smoothstep(250., 1800., dist));           // windows, balconies, doors, cornices
+  float ink = max(max(eS, eC * 0.8), eT * 0.62);
+  ink *= mix(1.0, 0.45, smoothstep(400., 4000., dist));                                     // the pen lightens with distance
+  // ---- wash: the real colour, thinned to a watercolour pigment, laid in soft value bands
+  float l = lum(c0);
+  vec3 chroma = c0 - vec3(l);
+  float lb = l * 4.2; float band = (floor(lb) + smoothstep(0.35, 0.65, fract(lb))) / 4.2;    // soft-edged value layers
+  float L = mix(l, band, 0.55);
+  L = 0.30 + 0.72 * pow(clamp(L, 0., 1.), 0.82);                                              // lift: let the paper through
+  vec3 pig = clamp(vec3(L) + chroma * 1.35, 0., 1.);
+  float wet = 0.86 + 0.28 * fbm(q * 0.02 + dist * 0.0004);
+  float gran = 0.92 + 0.16 * n2(q * 0.6);
+  vec3 col = paper * pow(clamp(pig, 0.03, 1.), vec3(wet * gran));
+  float sh = smoothstep(0.42, 0.18, l);                                                       // shade: a cool violet glaze, as a painter would
+  col *= mix(vec3(1.), vec3(0.80, 0.82, 0.92), sh * 0.8);
+  // ---- haze into the distance
+  float hz = smoothstep(2500., 26000., dist);
+  col = mix(col, paper * vec3(0.80, 0.84, 0.90), hz * 0.78);
+  col = mix(col, vec3(0.20, 0.145, 0.10) * paper, clamp(ink, 0., 1.) * mix(0.82, 0.40, hz));
+  out_FragColor = vec4(col, 1.);
+}`;
+scene.postProcessStages.add(new Cesium.PostProcessStage({ fragmentShader: FS }));
+
+// ---------------------------------------------------------------- labels: districts and landmarks, placed on the real roofs
+const LBL = [];
+const labelsEl = $('labels');
+const addLabel = (name, ar, lat, lon, kind) => { const el = document.createElement('div'); el.className = 'lb ' + kind;
+  el.innerHTML = (kind === 'lm' ? '<i></i>' : '') + '<span class="t">' + esc(name) + '</span>' + (ar ? '<span class="ar">' + esc(ar) + '</span>' : '');
+  labelsEl.appendChild(el); LBL.push({ el, lat, lon, kind, pos: Cesium.Cartesian3.fromDegrees(lon, lat, kind === 'pl' ? 140 : 90), w: 0, h: 0 }); };
+DISTRICTS.forEach(d => addLabel(d[0], d[1], d[2], d[3], 'pl'));
+const seen = new Set(DISTRICTS.map(d => d[0]));
+GROUPS.forEach(g => g[1].forEach(p => { if (!seen.has(p[0]) && p[4] < 700) addLabel(p[0], p[1], p[2], p[3], 'lm'); }));
+// settle each landmark label on the actual roof height once the city has loaded
+async function settleLabels() { try {
+  const cart = LBL.map(L => Cesium.Cartographic.fromDegrees(L.lon, L.lat));
+  const got = await scene.sampleHeightMostDetailed(cart);
+  got.forEach((c, i) => { if (c && isFinite(c.height)) LBL[i].pos = Cesium.Cartesian3.fromDegrees(LBL[i].lon, LBL[i].lat, c.height + (LBL[i].kind === 'pl' ? 60 : 8)); });
+  scene.requestRender(); } catch (e) {} }
+const tmp = new Cesium.Cartesian2();
+function placeLabels() { const W = innerWidth, H = innerHeight, cam = scene.camera.positionWC, boxes = [];
+  const alt = scene.camera.positionCartographic.height;
+  const order = LBL.slice().sort((a, b) => (a.kind === 'lm' ? 0 : 1) - (b.kind === 'lm' ? 0 : 1));
+  for (const L of order) {
+    const d = Cesium.Cartesian3.distance(cam, L.pos);
+    const show = L.kind === 'pl' ? d > 900 && d < 16000 : d < 3500;
+    const p = show ? Cesium.SceneTransforms.worldToWindowCoordinates(scene, L.pos, tmp) : null;
+    let ok = !!p && p.x > -50 && p.x < W + 50 && p.y > 30 && p.y < H;
+    if (ok) { if (!L.w) { L.w = L.el.offsetWidth; L.h = L.el.offsetHeight; }
+      const b = [p.x - L.w / 2 - 6, p.y - L.h - 4, p.x + L.w / 2 + 6, p.y + 2];
+      ok = !boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+      if (ok) { boxes.push(b); L.el.style.left = p.x + 'px'; L.el.style.top = p.y + 'px'; } }
+    L.el.classList.toggle('on', ok); } }
+scene.postRender.addEventListener(placeLabels);
+
+// ---------------------------------------------------------------- camera
+const fly = (lat, lon, range, dur = 2.2) => {
+  const target = Cesium.Cartesian3.fromDegrees(lon, lat, 40);
+  const heading = scene.camera.heading;
+  viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(target, 1), { offset: new Cesium.HeadingPitchRange(heading, Cesium.Math.toRadians(-32), range), duration: dur }); };
+const start = () => viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(-5.8020, 35.7740, 900),
+  orientation: { heading: Cesium.Math.toRadians(-38), pitch: Cesium.Math.toRadians(-24), roll: 0 } });
+$('zin').onclick = () => { scene.camera.moveForward(Cesium.Cartesian3.distance(scene.camera.positionWC, pickCentre() || scene.camera.positionWC) * 0.4 || 200); scene.requestRender(); };
+$('zout').onclick = () => { scene.camera.moveBackward(Math.max(200, Cesium.Cartesian3.distance(scene.camera.positionWC, pickCentre() || scene.camera.positionWC) * 0.6)); scene.requestRender(); };
+const pickCentre = () => { try { return scene.pickPosition(new Cesium.Cartesian2(innerWidth / 2, innerHeight / 2)); } catch (e) { return null; } };
+$('north').onclick = () => { const c = pickCentre(); if (!c) { scene.camera.setView({ orientation: { heading: 0, pitch: scene.camera.pitch, roll: 0 } }); return; }
+  const r = Cesium.Cartesian3.distance(scene.camera.positionWC, c);
+  viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(c, 1), { offset: new Cesium.HeadingPitchRange(0, scene.camera.pitch, r), duration: 0.9 }); };
+scene.postRender.addEventListener(() => { $('needle').style.transform = 'rotate(' + (-scene.camera.heading) + 'rad)'; });
+
+// ---------------------------------------------------------------- index of places
+const listEl = $('list');
+function renderIndex(f = '') { const k = f.trim().toLowerCase(); let h = '';
+  for (const [g, items] of GROUPS) { const m = items.filter(i => !k || i[0].toLowerCase().includes(k) || i[1].includes(f.trim())); if (!m.length) continue;
+    h += '<h3>' + esc(g) + '</h3>' + m.map(i => '<button data-la="' + i[2] + '" data-lo="' + i[3] + '" data-d="' + i[4] + '"><span>' + esc(i[0]) + '</span>' + (i[1] ? '<small>' + esc(i[1]) + '</small>' : '') + '</button>').join(''); }
+  listEl.innerHTML = h || '<p style="padding:8px 14px;margin:0">No place by that name.</p>'; }
+renderIndex(); $('q').addEventListener('input', e => renderIndex(e.target.value));
+const idx = $('idx'), tog = $('tog');
+const toggleIdx = () => { idx.classList.toggle('closed'); const c = idx.classList.contains('closed'); tog.textContent = c ? 'Show' : 'Hide'; tog.setAttribute('aria-expanded', String(!c)); };
+tog.onclick = toggleIdx; if (innerWidth < 700) toggleIdx();
+listEl.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; fly(+b.dataset.la, +b.dataset.lo, +b.dataset.d); if (innerWidth < 700) toggleIdx(); });
+
+// ---------------------------------------------------------------- load Google's Photorealistic 3D Tiles through Cesium ion
+(async () => {
+  try {
+    $('lmsg').textContent = 'raising the city…';
+    const ts = await Cesium.createGooglePhotorealistic3DTileset({ onlyUsingWithGoogleGeocoder: true }, { maximumScreenSpaceError: mobile ? 24 : 12, cacheBytes: (mobile ? 256 : 768) * 1024 * 1024, maximumCacheOverflowBytes: 128 * 1024 * 1024 });
+    scene.primitives.add(ts);
+    start();
+    let shown = false;
+    ts.tileLoad.addEventListener(() => scene.requestRender());
+    ts.allTilesLoaded.addEventListener(() => { if (!shown) { shown = true; $('load').style.opacity = 0; setTimeout(() => $('load').remove(), 900); settleLabels(); } scene.requestRender(); });
+    setTimeout(() => { if (!shown) { shown = true; $('load').style.opacity = 0; setTimeout(() => $('load') && $('load').remove(), 900); settleLabels(); } }, 9000);
+  } catch (e) { fail('Could not load the 3D city: ' + (e && e.message ? e.message : e)); }
+})();
+window.__v = viewer;
+}
+</script>
+</body></html>
