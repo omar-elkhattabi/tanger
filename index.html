@@ -140,7 +140,7 @@ void main(){
   // ---------- ink
   vec3 Pr = eyeAt(uv + vec2(r, 0.)*tx), Pl = eyeAt(uv - vec2(r, 0.)*tx), Pu = eyeAt(uv + vec2(0., r)*tx), Pd = eyeAt(uv - vec2(0., r)*tx);
   float lap = (abs(Pr.z + Pl.z - 2.*P.z) + abs(Pu.z + Pd.z - 2.*P.z)) / dist;
-  float eS = smoothstep(0.004, 0.02, lap);
+  float eS = smoothstep(0.008, 0.03, lap);
   vec3 n0 = normalize(cross(Pr - Pl, Pu - Pd));
   vec3 n1 = normalize(cross(eyeAt(uv + vec2(2.*r, 0.)*tx) - P, eyeAt(uv + vec2(r, r)*tx) - Pr));
   vec3 n2_ = normalize(cross(eyeAt(uv + vec2(r, r)*tx) - Pu, eyeAt(uv + vec2(0., 2.*r)*tx) - P));
@@ -148,9 +148,9 @@ void main(){
   vec3 cB = blurC(uv, tx, 1.0);                                   // the photo, softened: we paint from it, we don't show it
   float gx = lum(blurC(uv + vec2(r, 0.)*tx, tx, 1.)) - lum(blurC(uv - vec2(r, 0.)*tx, tx, 1.));
   float gy = lum(blurC(uv + vec2(0., r)*tx, tx, 1.)) - lum(blurC(uv - vec2(0., r)*tx, tx, 1.));
-  float eT = smoothstep(0.09, 0.22, length(vec2(gx, gy)));
+  float eT = smoothstep(0.16, 0.34, length(vec2(gx, gy))) * (1. - smoothstep(150., 900., dist));
   float far_ = smoothstep(1.2, 6.0, mpp);                         // pen eases off as the city recedes
-  float ink = max(max(eS * 0.9, eC * 0.7 * (1. - far_)), eT * mix(0.55, 0.18, far_));
+  float ink = max(max(eS * 0.9, eC * 0.7 * (1. - far_)), eT * mix(0.32, 0.0, far_));
   ink *= 0.55 + 0.45 * smoothstep(0.25, 0.6, n2(q * 0.9));        // broken, hand-drawn line
   // ---------- wash: the real colour as watercolour pigment
   float l = lum(cB);
@@ -175,7 +175,7 @@ void main(){
   float hz = smoothstep(1200., 9000., dist);
   vec3 hzc = paper * vec3(0.90, 0.91, 0.92);
   col = mix(col, hzc, hz * 0.92);
-  col = mix(col, vec3(0.20, 0.145, 0.10) * paper, clamp(ink, 0., 1.) * 0.85 * (1. - hz));
+  col = mix(col, vec3(0.20, 0.145, 0.10) * paper, clamp(ink, 0., 1.) * 0.72 * (1. - hz));
   out_FragColor = vec4(col, 1.);
 }
 `;
